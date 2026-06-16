@@ -184,12 +184,10 @@ if __name__ == '__main__':
         print()
         print('=== snapshot ===')
         snap = await b.snapshot()
-        lines = snap.splitlines()
-        print(f'{len(lines)} elements:')
-        for line in lines[:20]:
-            print(f'  {line}')
 
-        await b.click(lines[0])
+        print(snap)
+
+        await b.click('@e75')
         await b.close()
 
 
