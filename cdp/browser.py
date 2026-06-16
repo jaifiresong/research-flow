@@ -142,6 +142,58 @@ class Browser:
         self._refs[ref] = (backend_id, obj_id)
         return obj_id
 
+    # ── scroll ──
+
+    async def scroll(self, direction: str = 'down', amount: float = 300,
+                     ref: str | None = None):
+        """按方向滚动页面或指定元素。
+
+        Args:
+            direction: 'up', 'down', 'left', 'right'
+            amount: 滚动像素数
+            ref: 可选，元素引用。传入时滚动该元素，否则滚动整个页面。
+        """
+        dx, dy = 0, 0
+        if direction == 'up':
+            dy = -amount
+        elif direction == 'down':
+            dy = amount
+        elif direction == 'left':
+            dx = -amount
+        elif direction == 'right':
+            dx = amount
+        else:
+            raise ValueError(f'未知方向: {direction}')
+
+        if ref:
+            obj_id = await self._object_id(ref)
+            await self._cdp.send('Runtime.callFunctionOn', {
+                'functionDeclaration': f'function(){{this.scrollBy({dx},{dy})}}',
+                'objectId': obj_id,
+            })
+        else:
+            await self.evaluate(f'window.scrollBy({dx},{dy})')
+
+    async def scroll_to_bottom(self):
+        """滚动页面到底部。"""
+        await self.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+
+    async def scroll_into_view(self, ref: str):
+        """将指定元素滚动到可视区域中央。
+
+        Args:
+            ref: 快照中的元素引用（例如 @e1）。
+        """
+        obj_id = await self._object_id(ref)
+        await self._cdp.send('Runtime.callFunctionOn', {
+            'functionDeclaration': (
+                'function(){'
+                'this.scrollIntoView({block:"center",inline:"center",behavior:"instant"});'
+                '}'
+            ),
+            'objectId': obj_id,
+        })
+
     # ── read ──
 
     async def evaluate(self, js: str):

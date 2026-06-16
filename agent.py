@@ -93,8 +93,13 @@ if __name__ == "__main__":
     print("=" * 50)
     print("确保 Chrome 已启动：google-chrome --remote-debugging-port=9222")
     print()
-    try:
-        asyncio.run(_chat_loop())
-    finally:
-        asyncio.run(browser_close.ainvoke({}))
+    async def _main():
+        try:
+            await _chat_loop()
+        except Exception as exc:
+            logger.error("运行异常: %s", exc)
+        finally:
+            await browser_close.ainvoke({})
+
+    asyncio.run(_main())
 

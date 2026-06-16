@@ -188,6 +188,45 @@ async def browser_wait(seconds: float = 2.0) -> str:
 
 @tool
 @log_tool_call
+async def browser_scroll(direction: str = "down", amount: float = 300, ref: str = "") -> str:
+    """按方向滚动页面或指定元素。
+
+    Args:
+        direction: 滚动方向，可选值：'up'（上）、'down'（下，默认）、'left'（左）、'right'（右）。
+        amount: 滚动像素数（默认 300）。想一次滚到底可以传大值如 99999。
+        ref: 可选，元素引用（如 @e1）。传入时滚动该元素内部，否则滚动整个页面。
+    """
+    await ensure_started()
+    b = get_browser()
+    r = ref if ref else None
+    await b.scroll(direction=direction, amount=amount, ref=r)
+    return f"已向 {direction} 滚动 {amount}px" + (f"（元素 {ref} 内）" if ref else "")
+
+
+@tool
+@log_tool_call
+async def browser_scroll_to_bottom() -> str:
+    """滚动页面到底部。"""
+    await ensure_started()
+    await get_browser().scroll_to_bottom()
+    return "已滚动到页面底部"
+
+
+@tool
+@log_tool_call
+async def browser_scroll_into_view(ref: str) -> str:
+    """将指定元素滚动到可视区域中央。
+
+    Args:
+        ref: 快照中的元素引用（例如 @e1）。
+    """
+    await ensure_started()
+    await get_browser().scroll_into_view(ref)
+    return f"已将 {ref} 滚动到可视区域"
+
+
+@tool
+@log_tool_call
 async def browser_close() -> str:
     """关闭浏览器并断开 CDP 连接。
 
@@ -207,6 +246,9 @@ BROWSER_TOOLS = [
     browser_click,
     browser_fill,
     browser_type,
+    browser_scroll,
+    browser_scroll_to_bottom,
+    browser_scroll_into_view,
     browser_evaluate,
     browser_title,
     browser_current_url,
