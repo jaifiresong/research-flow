@@ -1,8 +1,6 @@
 """Minimal browser automation via raw CDP — open, snapshot, click, fill."""
 import asyncio
 import json
-import urllib.request
-
 from cdp import CDPClient
 
 INTERACTIVE_ROLES = frozenset({

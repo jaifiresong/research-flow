@@ -21,13 +21,11 @@ class CDPClient:
             ws_url = f'ws://{self._host}:{self._port}/devtools/page/{target_id}'
         else:
             ws_url = await asyncio.to_thread(self._fetch_browser_ws_url)
-        self._ws = await websockets.connect(ws_url, max_size=2**24)
+        self._ws = await websockets.connect(ws_url, max_size=2 ** 24)
         asyncio.create_task(self._read_loop())
 
     def _fetch_browser_ws_url(self) -> str:
-        resp = urllib.request.urlopen(
-            f'http://{self._host}:{self._port}/json/version', timeout=5,
-        )
+        resp = urllib.request.urlopen(f'http://{self._host}:{self._port}/json/version', timeout=5)
         return json.loads(resp.read())['webSocketDebuggerUrl']
 
     async def _read_loop(self):
