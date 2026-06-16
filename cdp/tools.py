@@ -26,7 +26,10 @@ _tool_logger.addHandler(_handler)
 
 
 def log_tool_call(func):
-    """装饰器：记录工具调用的参数、返回值、耗时和异常到文件日志。"""
+    """装饰器：记录工具调用的参数、返回值、耗时和异常到文件日志。
+
+    出错时返回错误信息给 LLM，而不是抛出异常中断对话。
+    """
 
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
@@ -37,7 +40,7 @@ def log_tool_call(func):
             _tool_logger.info(
                 "[%s] args=%s kwargs=%s → %.3fs → %s",
                 func.__name__, args, kwargs, elapsed,
-                str(result)[:300],
+                str(result).split("\n")[0],
             )
             return result
         except Exception as exc:
@@ -46,7 +49,7 @@ def log_tool_call(func):
                 "[%s] args=%s kwargs=%s → %.3fs → ERROR: %s",
                 func.__name__, args, kwargs, elapsed, exc,
             )
-            raise
+            return f"[错误] {func.__name__} 执行失败: {exc}"
 
     return wrapper
 
