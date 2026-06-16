@@ -1,17 +1,63 @@
 """LangChain tools for browser automation via CDP."""
 import asyncio
+import functools
+import logging
+import time
+from pathlib import Path
 from typing import Optional
 
 from langchain.tools import tool
 
 from cdp.browser import Browser
 
+# ── 日志（仅输出到文件，不输出控制台） ──
+
+_tool_logger = logging.getLogger("cdp.tools")
+_tool_logger.setLevel(logging.DEBUG)
+_tool_logger.propagate = False  # 不传递给 root logger，避免输出到控制台
+
+_log_path = Path(__file__).parent.parent / "logs/tool_calls.log"
+_handler = logging.FileHandler(str(_log_path), encoding="utf-8")
+_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+))
+_tool_logger.addHandler(_handler)
+
+
+def log_tool_call(func):
+    """装饰器：记录工具调用的参数、返回值、耗时和异常到文件日志。"""
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        t0 = time.monotonic()
+        try:
+            result = await func(*args, **kwargs)
+            elapsed = time.monotonic() - t0
+            _tool_logger.info(
+                "[%s] args=%s kwargs=%s → %.3fs → %s",
+                func.__name__, args, kwargs, elapsed,
+                str(result)[:300],
+            )
+            return result
+        except Exception as exc:
+            elapsed = time.monotonic() - t0
+            _tool_logger.error(
+                "[%s] args=%s kwargs=%s → %.3fs → ERROR: %s",
+                func.__name__, args, kwargs, elapsed, exc,
+            )
+            raise
+
+    return wrapper
+
+
+# ── 浏览器实例管理 ──
 
 _browser: Optional[Browser] = None
 
 
 def get_browser() -> Browser:
-    """Get or create the global Browser instance."""
+    """获取或创建全局浏览器实例。"""
     global _browser
     if _browser is None:
         _browser = Browser(port=9222)
@@ -19,84 +65,93 @@ def get_browser() -> Browser:
 
 
 async def ensure_started() -> None:
+    """确保浏览器已启动并连接。"""
     b = get_browser()
     if b._cdp is None:
         await b.start()
 
 
+# ── 浏览器工具 ──
+
+
 @tool
+@log_tool_call
 async def browser_open(url: str, wait: float = 3.0) -> str:
-    """Navigate the browser to a URL and wait for the page to load.
+    """导航到指定 URL 并等待页面加载。
 
     Args:
-        url: The full URL to navigate to (e.g. https://example.com).
-        wait: Seconds to wait for SPA content to render (default 3.0).
+        url: 完整的 URL 地址（例如 https://example.com）。
+        wait: SPA 页面渲染等待秒数（默认 3.0）。
     """
     await ensure_started()
     b = get_browser()
     await b.open(url, spa_wait=wait)
-    return f"Opened {await b.url()} — title: {await b.title()}"
+    return f"已打开 {await b.url()} — 标题: {await b.title()}"
 
 
 @tool
+@log_tool_call
 async def browser_snapshot() -> str:
-    """Capture an accessibility snapshot of the current page.
+    """获取当前页面的可访问性快照。
 
-    Returns a list of interactive elements (links, buttons, inputs, etc.)
-    each prefixed with a reference like @e1, @e2 that can be used
-    with click and fill tools.
+    返回所有可交互元素（链接、按钮、输入框等），每个元素前有引用标记如 @e1、@e2，
+    可供 click / fill 工具使用。
     """
     await ensure_started()
     return await get_browser().snapshot()
 
 
 @tool
+@log_tool_call
 async def browser_click(ref: str) -> str:
-    """Click an interactive element on the page.
+    """点击页面上的可交互元素。
 
     Args:
-        ref: Element reference from snapshot (e.g. @e1, @e42).
+        ref: 快照中的元素引用（例如 @e1、@e42）。
     """
     await ensure_started()
     b = get_browser()
     await b.click(ref)
-    return f"Clicked {ref} — current URL: {await b.url()}, title: {await b.title()}"
+    return f"已点击 {ref} — 当前 URL: {await b.url()}, 标题: {await b.title()}"
 
 
 @tool
+@log_tool_call
 async def browser_fill(ref: str, text: str) -> str:
-    """Fill text into an input element or select an option from a dropdown.
+    """向输入框填入文本或在下拉菜单中选择选项。
 
     Args:
-        ref: Element reference from snapshot (e.g. @e1).
-        text: Text to type into the field or option text to select.
+        ref: 快照中的元素引用（例如 @e1）。
+        text: 要填入的文本，或要匹配的下拉选项文本。
     """
     await ensure_started()
     b = get_browser()
     await b.fill(ref, text)
-    return f"Filled {ref} with: {text}"
+    return f"已填入 {ref}: {text}"
 
 
 @tool
+@log_tool_call
 async def browser_type(ref: str, text: str) -> str:
-    """Alias for browser_fill — type text into an input element.
+    """browser_fill 的别名 —— 向输入框输入文本。
 
     Args:
-        ref: Element reference from snapshot (e.g. @e1).
-        text: Text to type into the field.
+        ref: 快照中的元素引用（例如 @e1）。
+        text: 要输入的文本。
     """
     await ensure_started()
     b = get_browser()
     await b.type(ref, text)
-    return f"Typed into {ref}: {text}"
+    return f"已输入 {ref}: {text}"
 
 
 @tool
+@log_tool_call
 async def browser_evaluate(js: str) -> str:
-    """Execute JavaScript in the page and return the result.
+    """在页面中执行 JavaScript 并返回结果。
 
     Args:
-        js: JavaScript expression to evaluate (e.g. 'document.title').
+        js: 要执行的 JavaScript 表达式（例如 'document.title'）。
     """
     await ensure_started()
     result = await get_browser().evaluate(js)
@@ -104,42 +159,46 @@ async def browser_evaluate(js: str) -> str:
 
 
 @tool
+@log_tool_call
 async def browser_title() -> str:
-    """Get the current page title."""
+    """获取当前页面的标题。"""
     await ensure_started()
     return await get_browser().title()
 
 
 @tool
+@log_tool_call
 async def browser_current_url() -> str:
-    """Get the current page URL."""
+    """获取当前页面的 URL。"""
     await ensure_started()
     return await get_browser().url()
 
 
 @tool
+@log_tool_call
 async def browser_wait(seconds: float = 2.0) -> str:
-    """Wait for a number of seconds (useful after page interactions).
+    """等待指定秒数（用于等待页面渲染或动画完成）。
 
     Args:
-        seconds: Number of seconds to wait (default 2.0).
+        seconds: 等待秒数（默认 2.0）。
     """
     await asyncio.sleep(seconds)
-    return f"Waited {seconds}s"
+    return f"已等待 {seconds}s"
 
 
 @tool
+@log_tool_call
 async def browser_close() -> str:
-    """Close the browser and disconnect from CDP.
+    """关闭浏览器并断开 CDP 连接。
 
-    Call this when you are done with browser automation.
+    完成浏览器自动化后调用此工具。
     """
     global _browser
     if _browser is not None:
         b = _browser
         _browser = None
         await b.close()
-    return "Browser closed"
+    return "浏览器已关闭"
 
 
 BROWSER_TOOLS = [

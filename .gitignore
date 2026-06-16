@@ -13,3 +13,4 @@ build/
 output/
 tmp
 .idea
+logs
