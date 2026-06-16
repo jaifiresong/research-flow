@@ -1,39 +1,196 @@
-import subprocess
-import sys
+"""Minimal browser automation via raw CDP — open, snapshot, click, fill."""
 import asyncio
+import json
+import urllib.request
 
-import nodriver as uc
+from cdp import CDPClient
 
-CDP_PORT = 9222
-
-
-def ab_snapshot(interactive: bool = True) -> str:
-    args = ['agent-browser', '--cdp', str(CDP_PORT), 'snapshot']
-    if interactive:
-        args.append('-i')
-    if sys.platform == 'win32':
-        args = ['pwsh', '-Command'] + args
-    r = subprocess.run(args, capture_output=True, text=True, timeout=30, encoding='utf-8')
-    return r.stdout.strip()
+INTERACTIVE_ROLES = frozenset({
+    'link', 'button', 'textbox', 'combobox', 'checkbox',
+    'listbox', 'menuitem', 'tab', 'switch', 'searchbox',
+    'spinbutton', 'radio', 'menuitemcheckbox', 'menuitemradio',
+    'option', 'slider', 'toggle',
+})
 
 
-async def main():
-    chrome_path = '/usr/bin/false' if sys.platform == 'linux' else None
-    b = await uc.Browser.create(host='127.0.0.1', port=CDP_PORT,
-                                browser_executable_path=chrome_path)
+class Browser:
+    def __init__(self, host: str = '127.0.0.1', port: int = 9222):
+        self._host = host
+        self._port = port
+        self._cdp: CDPClient | None = None
+        self._target_id: str = ''
+        self._refs: dict[str, tuple[int, str]] = {}
 
-    for i in range(1):
-        print(f'=== round {i+1} ===')
-        tab = await b.get('https://www.zhipin.com/web/geek/jobs')
-        await asyncio.sleep(5)
-        title = await tab.evaluate('document.title')
-        print(f'  title: {title}')
-        print(f'  body:  {len(await tab.get_content())} chars')
+    async def start(self):
+        browser = CDPClient(self._host, self._port)
+        await browser.connect()
+        result = await browser.send('Target.createTarget', {'url': 'about:blank'})
+        self._target_id = result['targetId']
+        await browser.close()
+        self._cdp = CDPClient(self._host, self._port)
+        await self._cdp.connect(target_id=self._target_id)
 
-        print()
+    # ── navigation ──
 
-    print('done - check Chrome tabs manually')
+    async def open(self, url: str, spa_wait: float = 0):
+        nav = await self._cdp.send('Page.navigate', {'url': url})
+        if nav.get('errorText'):
+            raise RuntimeError(nav['errorText'])
+        await self._wait_ready(spa_wait=spa_wait)
+
+    async def _wait_ready(self, spa_wait: float = 1.0):
+        # 不用 Runtime.evaluate polling，避免在页面加载期间 enable Runtime
+        await asyncio.sleep(spa_wait)
+
+    # ── snapshot ──
+
+    async def snapshot(self) -> str:
+        self._refs.clear()
+        await self._cdp.send('Accessibility.enable')
+        nodes = await self._cdp.send('Accessibility.getFullAXTree')
+        ax_nodes = nodes.get('nodes', [])
+        lines: list[str] = []
+        ref_idx = 0
+
+        for node in ax_nodes:
+            role_val = node.get('role', {})
+            role = role_val.get('value', '').lower() if isinstance(role_val, dict) else ''
+            if not role or role not in INTERACTIVE_ROLES:
+                continue
+            backend_id = node.get('backendDOMNodeId')
+            if node.get('ignored') or not backend_id:
+                continue
+
+            ref_idx += 1
+            ref = f'@e{ref_idx}'
+            self._refs[ref] = (backend_id, '')
+
+            name = (node.get('name') or {}).get('value', '') \
+                if isinstance(node.get('name'), dict) else ''
+            if not name:
+                name = (node.get('value') or {}).get('value', '') \
+                    if isinstance(node.get('value'), dict) else ''
+
+            props = {}
+            for p in node.get('properties') or []:
+                v = p.get('value', {})
+                props[p.get('name', '')] = v.get('value', '') if isinstance(v, dict) else ''
+
+            line = f'{ref} [{role}]'
+            tag = props.get('htmlTag', '').lower()
+            if tag:
+                line += f' <{tag}>'
+            if name:
+                line += f' "{str(name)[:80]}"'
+            url_prop = props.get('url', '')
+            if url_prop and not url_prop.startswith('javascript:'):
+                line += f' → {url_prop[:80]}'
+            placeholder = props.get('placeholder', '')
+            if placeholder:
+                line += f' placeholder="{str(placeholder)[:40]}"'
+            if props.get('checked'):
+                line += ' (checked)'
+            lines.append(line)
+
+        return '\n'.join(lines) if lines else '(no interactive elements)'
+
+    # ── interaction ──
+
+    async def click(self, ref: str):
+        obj_id = await self._object_id(ref)
+        await self._cdp.send('Runtime.callFunctionOn', {
+            'functionDeclaration': (
+                'function(){'
+                'this.scrollIntoView({block:"center",behavior:"instant"});'
+                'this.click();'
+                '}'
+            ),
+            'objectId': obj_id,
+        })
+        await self._wait_ready()
+
+    async def fill(self, ref: str, text: str):
+        obj_id = await self._object_id(ref)
+        escaped = json.dumps(text)
+        await self._cdp.send('Runtime.callFunctionOn', {
+            'functionDeclaration': (
+                f'function(){{'
+                f'this.focus();'
+                f'this.value="";'
+                f'if(this.tagName=="SELECT"){{'
+                f'  for(let o of this.options)if(o.text.includes({escaped})){{o.selected=true;break}}'
+                f'  this.dispatchEvent(new Event("change",{{bubbles:true}}));'
+                f'}}else{{'
+                f'  this.value={escaped};'
+                f'  this.dispatchEvent(new Event("input",{{bubbles:true}}));'
+                f'  this.dispatchEvent(new Event("change",{{bubbles:true}}));'
+                f'}}'
+            ),
+            'objectId': obj_id,
+        })
+
+    async def type(self, ref: str, text: str):
+        await self.fill(ref, text)
+
+    async def _object_id(self, ref: str) -> str:
+        if ref not in self._refs:
+            raise KeyError(f'Unknown ref {ref}')
+        backend_id, obj_id = self._refs[ref]
+        if obj_id:
+            return obj_id
+        result = await self._cdp.send('DOM.resolveNode',
+                                      {'backendNodeId': backend_id})
+        obj_id = result['object']['objectId']
+        self._refs[ref] = (backend_id, obj_id)
+        return obj_id
+
+    # ── read ──
+
+    async def evaluate(self, js: str):
+        result = await self._cdp.send('Runtime.evaluate', {
+            'expression': js,
+            'returnByValue': True,
+        })
+        exc = result.get('exceptionDetails')
+        if exc:
+            raise RuntimeError(str(exc.get('exception', {}).get('description', exc.get('text', ''))))
+        return result.get('result', {}).get('value')
+
+    async def title(self) -> str:
+        return (await self.evaluate('document.title')) or ''
+
+    async def url(self) -> str:
+        return (await self.evaluate('document.URL')) or ''
+
+    async def close(self):
+        if self._cdp:
+            await self._cdp.close()
 
 
 if __name__ == '__main__':
+    async def main():
+        b = Browser(port=9222)
+        await b.start()
+
+        print('=== open zhipin ===')
+        await b.open('https://www.zhipin.com/web/geek/jobs', spa_wait=4)
+        print('title:', await b.title())
+        print('url:', await b.url())
+
+        await asyncio.sleep(3)
+        print('after 3s: title:', await b.title())
+        print('after 3s: url:', await b.url())
+
+        print()
+        print('=== snapshot ===')
+        snap = await b.snapshot()
+        lines = snap.splitlines()
+        print(f'{len(lines)} elements:')
+        for line in lines[:20]:
+            print(f'  {line}')
+
+        await b.click(lines[0])
+        await b.close()
+
+
     asyncio.run(main())
