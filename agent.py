@@ -176,7 +176,8 @@ async def _chat_loop():
                     print(f"   🔧 {tc['name']}({args_str})")
             elif content:
                 prefix = "⚠️ " if content.startswith("[错误]") else ""
-                print(f"Agent: {prefix}{content[:300]}")
+                print(f"Agent: ")
+                print(f"{prefix}{content}")
 
         # 输出本轮统计
         rounds, errors = _count_rounds_and_errors(added)

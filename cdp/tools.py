@@ -252,7 +252,7 @@ BROWSER_TOOLS = [
     browser_scroll,
     browser_scroll_to_bottom,
     browser_scroll_into_view,
-    browser_evaluate,
+    # browser_evaluate,
     browser_title,
     browser_current_url,
     browser_wait,
