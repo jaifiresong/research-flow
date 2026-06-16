@@ -4,7 +4,7 @@ import sys
 from datetime import datetime
 
 from config import DEFAULT_MAX_PAGES, DEFAULT_OUTPUT_DIR
-from browser import search_google, extract_urls_from_snapshot, open_url, get_page_text, close_browser
+from cdp import search_google, extract_urls_from_snapshot, open_url, get_page_text, close_browser
 from agent import plan_search, summarize_page, generate_review
 from report import generate_html_report
 
