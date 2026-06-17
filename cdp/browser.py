@@ -92,6 +92,11 @@ class Browser:
 
         return '\n'.join(lines) if lines else '(no interactive elements)'
 
+    async def extract_ax_tree(self) -> dict:
+        await self._cdp.send('Accessibility.enable')
+        nodes = await self._cdp.send('Accessibility.getFullAXTree')
+        return nodes
+
     # ── interaction ──
 
     async def click(self, ref: str):

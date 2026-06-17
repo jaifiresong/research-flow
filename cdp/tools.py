@@ -106,6 +106,63 @@ async def browser_snapshot() -> str:
 
 @tool
 @log_tool_call
+async def browser_extract(instruction: str) -> str:
+    """从当前页面提取结构化数据。
+
+    获取页面的完整内容树，然后根据指令提取特定字段。
+    提取的数据会自动保存到 agent 的 findings 中。
+
+    Args:
+        instruction: 提取指令，描述要从页面提取什么数据。
+                     例如："提取所有岗位的名称、工资、地区"
+                     例如："提取职位列表中的公司名和薪资范围"
+    """
+    await ensure_started()
+    b = get_browser()
+    raw = await b.extract_ax_tree()
+    ax_nodes = raw.get('nodes', [])
+
+    readable_lines = []
+    for node in ax_nodes:
+        role_val = node.get('role', {})
+        role = role_val.get('value', '').lower() if isinstance(role_val, dict) else ''
+        if not role:
+            continue
+        name = ''
+        if isinstance(node.get('name'), dict):
+            name = node['name'].get('value', '')
+        elif isinstance(node.get('name'), str):
+            name = node['name']
+        value = ''
+        if isinstance(node.get('value'), dict):
+            value = node['value'].get('value', '')
+
+        props = {}
+        for p in node.get('properties') or []:
+            v = p.get('value', {})
+            props[p.get('name', '')] = v.get('value', '') if isinstance(v, dict) else ''
+
+        line = f'[{role}]'
+        if name:
+            line += f' "{str(name)[:120]}"'
+        if value and role in ('statictext', 'text', 'heading', 'paragraph', 'generic'):
+            display_val = str(value)[:120]
+            if display_val != str(name)[:120]:
+                line += f' = {display_val}'
+        url_prop = props.get('url', '')
+        if url_prop and not url_prop.startswith('javascript:'):
+            line += f' → {url_prop[:80]}'
+        readable_lines.append(line)
+
+    snapshot_text = '\n'.join(readable_lines[:300])
+    if len(readable_lines) > 300:
+        snapshot_text += f'\n... (共 {len(readable_lines)} 个节点，已截断)'
+
+    return f"EXTRACT_RESULT|{instruction}|{len(readable_lines)}\n{snapshot_text}"
+
+
+@tool
+@log_tool_call
 async def browser_click(ref: str) -> str:
     """点击页面上的可交互元素。
 
@@ -246,6 +303,7 @@ async def browser_close() -> str:
 BROWSER_TOOLS = [
     browser_open,
     browser_snapshot,
+    browser_extract,
     browser_click,
     browser_fill,
     browser_type,
