@@ -1,4 +1,8 @@
 from mcp.server.fastmcp import FastMCP
+# 注册当前目录到python 环境变量
+import sys
+
+sys.path.append(sys.path[0])
 
 from tools import (
     browser_open,
