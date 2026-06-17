@@ -3,6 +3,7 @@ from typing import Annotated, TypedDict
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
+from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
@@ -131,4 +132,4 @@ def build_agent_graph():
     graph.add_edge("combine", "agent")
     graph.add_edge("limit_reached", END)
 
-    return graph.compile(interrupt_before=["confirm"])
+    return graph.compile(checkpointer=MemorySaver(), interrupt_before=["confirm"])
