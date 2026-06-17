@@ -1,9 +1,6 @@
 import json
-import logging
 from langchain.tools import tool
 from agent.memory import StructuredMemory
-
-logger = logging.getLogger(__name__)
 
 _memory = StructuredMemory()
 
