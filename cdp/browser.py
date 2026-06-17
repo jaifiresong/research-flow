@@ -1,7 +1,7 @@
 """Minimal browser automation via raw CDP — open, snapshot, click, fill."""
 import asyncio
 import json
-from cdp_client import CDPClient
+from cdp.cdp_client import CDPClient
 
 INTERACTIVE_ROLES = frozenset({
     'link', 'button', 'textbox', 'combobox', 'checkbox',

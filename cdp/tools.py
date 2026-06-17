@@ -8,7 +8,7 @@ from typing import Optional
 
 from langchain.tools import tool
 
-from browser import Browser
+from cdp.browser import Browser
 
 # ── 日志（仅输出到文件，不输出控制台） ──
 
