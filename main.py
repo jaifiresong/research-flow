@@ -2,10 +2,9 @@ import asyncio
 import json
 import logging
 
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
-from agent import StructuredMemory, build_agent_graph
-from agent.memory import StructuredMemory as _SM
+from agent import build_agent_graph
 from agent.tools import get_memory, reset_memory
 from cdp.tools import browser_close
 
