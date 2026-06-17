@@ -53,7 +53,7 @@ async def confirm_node(state: AgentState) -> dict:
 
     user_response = interrupt(f"📋 计划已生成：\n{plan_text}\n\n确认执行？(y/n)")
 
-    if isinstance(user_response, str) and user_response.lower().strip() in ("y", "yes", "确认", "确认执行"):
+    if isinstance(user_response, str) and user_response.lower().strip() in ("confirmed", "y", "yes", "确认", "确认执行"):
         return {"messages": [HumanMessage(content="[已确认计划，开始执行]")]}
     else:
         return {"messages": [HumanMessage(content=f"[用户反馈: {user_response}]，请根据反馈调整计划。")]}
@@ -84,8 +84,6 @@ async def combine_node(state: AgentState) -> dict:
             compressed.append(
                 ToolMessage(content=summary, tool_call_id=m.tool_call_id, name=m.name, id=m.id)
             )
-        else:
-            compressed.append(m)
 
     return {"messages": compressed}
 
