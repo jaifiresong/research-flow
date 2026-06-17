@@ -1,5 +1,4 @@
 import json
-from typing import Any
 
 
 class StructuredMemory:
@@ -10,7 +9,10 @@ class StructuredMemory:
 
     def update(self, section: str, data: str | dict) -> None:
         if isinstance(data, str):
-            data = json.loads(data)
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON string for memory update: {e}")
 
         if section == "plan":
             self._merge_plan(data)
@@ -57,14 +59,14 @@ class StructuredMemory:
         lines = [f"[计划] {self.plan.get('goal', '未设定目标')}"]
         current = self.plan.get("current_step", 0)
         for step in self.plan.get("steps", []):
-            sid = step["id"]
-            action = step["action"]
-            note = f" — {step['note']}" if step.get("note") else ""
-            if step["status"] == "done":
+            sid = step.get("id", "?")
+            action = step.get("action", "?")
+            note = f" — {step.get('note')}" if step.get("note") else ""
+            if step.get("status") == "done":
                 marker = "✓"
-            elif step["status"] == "failed":
+            elif step.get("status") == "failed":
                 marker = "✗"
-            elif step["status"] == "in_progress" or sid == current:
+            elif step.get("status") == "in_progress" or sid == current:
                 marker = "→"
             else:
                 marker = "·"

@@ -78,3 +78,43 @@ def test_update_invalid_section_raises():
     mem = StructuredMemory()
     with pytest.raises(ValueError):
         mem.update("invalid_section", {})
+
+
+def test_update_with_json_string():
+    mem = StructuredMemory()
+    mem.update("plan", '{"goal": "from json"}')
+    assert mem.plan["goal"] == "from json"
+
+
+def test_update_with_invalid_json_string():
+    mem = StructuredMemory()
+    with pytest.raises(ValueError, match="Invalid JSON string"):
+        mem.update("plan", "not valid json")
+
+
+def test_update_plan_step_deduplication():
+    mem = StructuredMemory()
+    mem.update("plan", {
+        "steps": [
+            {"id": 1, "action": "step one", "status": "pending"},
+            {"id": 2, "action": "step two", "status": "pending"},
+        ]
+    })
+    mem.update("plan", {
+        "steps": [
+            {"id": 2, "action": "step two updated", "status": "done"},
+            {"id": 3, "action": "step three", "status": "pending"},
+        ]
+    })
+    assert len(mem.plan["steps"]) == 3
+    steps_by_id = {s["id"]: s for s in mem.plan["steps"]}
+    assert steps_by_id[2]["action"] == "step two updated"
+    assert steps_by_id[2]["status"] == "done"
+    assert steps_by_id[3]["action"] == "step three"
+
+
+def test_format_plan_with_malformed_step():
+    mem = StructuredMemory()
+    mem.update("plan", {"goal": "test", "steps": [{"id": 1}]})
+    text = mem.format_for_injection()
+    assert "test" in text
