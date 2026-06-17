@@ -1,5 +1,3 @@
-import json
-import logging
 from typing import Annotated, TypedDict
 
 from langgraph.graph import StateGraph, END
@@ -7,16 +5,13 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
-from langgraph.types import interrupt, Command
+from langgraph.types import interrupt
 
 from config import OPENAI_API_KEY
-from cdp.tools import BROWSER_TOOLS, browser_close
-from agent.memory import StructuredMemory
+from cdp.tools import BROWSER_TOOLS
 from agent.tools import update_memory, read_memory, get_memory, reset_memory
-from agent.compressor import compress_tool_result, trim_messages, estimate_tokens
+from agent.compressor import compress_tool_result
 from agent.prompts import PLANNER_SYSTEM_PROMPT, EXECUTOR_SYSTEM_PROMPT
-
-logger = logging.getLogger(__name__)
 
 MAX_STEPS = 30
 MAX_ERRORS = 5
@@ -87,7 +82,7 @@ async def combine_node(state: AgentState) -> dict:
         if isinstance(m, ToolMessage) and len(m.content) > 150:
             summary = await compress_tool_result(m)
             compressed.append(
-                ToolMessage(content=summary, tool_call_id=m.tool_call_id, name=m.name)
+                ToolMessage(content=summary, tool_call_id=m.tool_call_id, name=m.name, id=m.id)
             )
         else:
             compressed.append(m)
