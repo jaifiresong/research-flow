@@ -59,6 +59,10 @@ async def planner_node(state: AgentState) -> dict:
 async def confirm_node(state: AgentState) -> dict:
     memory = get_memory()
     plan_text = memory.format_for_injection()
+    steps = memory.plan.get("steps", [])
+
+    if len(steps) <= 3:
+        return {"messages": [HumanMessage(content="[已确认计划，开始执行]")]}
 
     user_response = interrupt(f"📋 计划已生成：\n{plan_text}\n\n确认执行？(y/n)")
 
@@ -140,4 +144,4 @@ def build_agent_graph():
     graph.add_edge("combine", "agent")
     graph.add_edge("limit_reached", END)
 
-    return graph.compile(checkpointer=MemorySaver(), interrupt_before=["confirm"])
+    return graph.compile(checkpointer=MemorySaver())
