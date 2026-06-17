@@ -45,7 +45,15 @@ async def planner_node(state: AgentState) -> dict:
     prompt = f"{PLANNER_SYSTEM_PROMPT}\n\n用户任务：{user_goal}"
     response = await planner_llm.ainvoke([SystemMessage(content=prompt), HumanMessage(content=user_goal)])
 
-    return {"messages": [response]}
+    result_msgs = [response]
+    if response.tool_calls:
+        for tc in response.tool_calls:
+            result = await update_memory.ainvoke(tc["args"])
+            result_msgs.append(
+                ToolMessage(content=str(result), tool_call_id=tc["id"], name="update_memory")
+            )
+
+    return {"messages": result_msgs}
 
 
 async def confirm_node(state: AgentState) -> dict:
