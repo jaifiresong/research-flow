@@ -54,7 +54,7 @@ class CDPClient:
             await self._ws.send(json.dumps(msg))
             resp = await asyncio.wait_for(future, timeout=30)
         finally:
-            await self._futures.pop(self._id, None)
+            self._futures.pop(self._id, None)
             future.cancel()  # no-op if already resolved
         err = resp.get('error')
         if err:

@@ -59,7 +59,7 @@
 | 方法 | 全称 | 作用 | 入参示例 | 使用场景 |
 |------|------|------|----------|----------|
 | Page.navigate | 页面跳转 | 加载目标URL，刷新/打开新页面 | `{"url":"https://www.xxx.com"}` | 初始化访问目标网页 |
-| Page.enable | 启用Page域 | 必须前置调用，否则Page下所有接口失效 | `{}` | 程序启动第一步初始化 |
+| Page.enable | 启用Page域 | 订阅Page域事件（如页面加载完成），Page.navigate 无需此外也能正常工作 | `{}` | 需要监听页面事件时调用 |
 
 补充配套Page滚动相关（上文滚动用到）：
 - Page.getLayoutMetrics：获取视口、文档宽高（精准替代JS获取页面尺寸）
@@ -114,20 +114,20 @@ doc = await cdp.send_cmd("DOM.getDocument")
 body_node = await cdp.send_cmd("DOM.querySelector", {"nodeId": doc["result"]["root"]["nodeId"], "selector": "body"})
 
 # 5. 转换节点ID为Runtime objectId（DOM.resolveNode）
-resolve_res = await cdp.send_cmd("DOM.resolveNode", {"backendNodeId": body_node["result"]["backendNodeId"]})
+resolve_res = await cdp.send_cmd("DOM.resolveNode", {"nodeId": body_node["result"]["nodeId"]})
 obj_id = resolve_res["result"]["object"]["objectId"]
 
 # 6. callFunctionOn 调用body滚动方法
 await cdp.send_cmd("Runtime.callFunctionOn", {
     "objectId": obj_id,
     "functionDeclaration": "function(){this.scrollTop = this.scrollHeight}",
-    "returnByValue": True
+    "returnByValue": true
 })
 
 # 简易方案：Runtime.evaluate 直接执行滚动JS
 await cdp.send_cmd("Runtime.evaluate", {
     "expression": "window.scrollTo(0, document.body.scrollHeight)",
-    "returnByValue": True
+    "returnByValue": true
 })
 ```
 
