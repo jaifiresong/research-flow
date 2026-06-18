@@ -1,83 +1,184 @@
 import asyncio
 import json
 import urllib.request
-from urllib import parse
 
 import websockets
 
 
+class CDPConnection:
+    """单条 WebSocket 的 CDP 消息协议层：序列化、路由、响应匹配"""
+
+    def __init__(self):
+        self._ws = None
+        self._id = 0
+        self._futures: dict[int, asyncio.Future] = {}
+        self._event_callbacks: list = []
+
+    async def connect(self, ws_url: str) -> None:
+        self._ws = await websockets.connect(ws_url, max_size=2 ** 24)
+        asyncio.create_task(self._read_loop())
+
+    def on_event(self, callback):
+        """注册 CDP 事件回调 callback(method: str, params: dict)"""
+        self._event_callbacks.append(callback)
+
+    async def send(self, method: str, params: dict | None = None) -> dict:
+        self._id += 1
+        msg: dict = {'id': self._id, 'method': method}
+        if params:
+            msg['params'] = params
+        future = asyncio.get_event_loop().create_future()
+        self._futures[self._id] = future
+        try:
+            await self._ws.send(json.dumps(msg))
+            resp = await asyncio.wait_for(future, timeout=30)
+        finally:
+            self._futures.pop(self._id, None)
+            future.cancel()
+        err = resp.get('error')
+        if err:
+            raise RuntimeError(err.get('message', str(err)))
+        return resp.get('result', {})
+
+    async def _read_loop(self):
+        try:
+            async for raw in self._ws:
+                msg = json.loads(raw)
+                rid = msg.get('id')
+                if rid is not None and rid in self._futures:
+                    self._futures.pop(rid).set_result(msg)
+                elif msg.get('method') and self._event_callbacks:
+                    for cb in self._event_callbacks:
+                        cb(msg['method'], msg.get('params', {}))
+        except websockets.ConnectionClosed:
+            pass
+        finally:
+            for f in self._futures.values():
+                if not f.done():
+                    f.set_exception(RuntimeError('CDP connection closed'))
+            self._futures.clear()
+
+    async def close(self):
+        if self._ws:
+            await self._ws.close()
+
+
 class Driver:
-    def __init__(self, ws):
-        self._ws = ws
+    """浏览器层连接：管理 targets"""
 
-    async def open_tab(self, url: str) -> str:
-        print(f"Opening tab: {url}")
-        print(self._ws)
-        if url:
-            result = await self._ws.send('Target.createTarget', {'url': url})
-        else:
-            result = await self._ws.send('Target.createTarget', {'url': 'about:blank'})
+    def __init__(self, conn: CDPConnection):
+        self._conn = conn
 
+    async def open_tab(self, url: str = 'about:blank') -> str:
+        result = await self._conn.send('Target.createTarget', {'url': url})
         return result['targetId']
+
+    async def close_tab(self, target_id: str) -> None:
+        await self._conn.send('Target.closeTarget', {'targetId': target_id})
+
+    async def close(self):
+        await self._conn.close()
 
 
 class Page:
-    def __init__(self, ws, key):
-        self._ws = ws
-        self._id = key
+    """页面层连接：操作单个 tab"""
+
+    def __init__(self, conn: CDPConnection, target_id: str):
+        self._conn = conn
+        self._target_id = target_id
 
     @property
-    def id(self):
-        return self._id
+    def target_id(self) -> str:
+        return self._target_id
+
+    async def navigate(self, url: str) -> dict:
+        return await self._conn.send('Page.navigate', {'url': url})
+
+    async def evaluate(self, js: str):
+        result = await self._conn.send('Runtime.evaluate', {
+            'expression': js,
+            'returnByValue': True,
+        })
+        exc = result.get('exceptionDetails')
+        if exc:
+            raise RuntimeError(
+                str(exc.get('exception', {}).get('description', exc.get('text', '')))
+            )
+        return result.get('result', {}).get('value')
+
+    async def send(self, method: str, params: dict | None = None) -> dict:
+        """透传底层 CDP 命令"""
+        return await self._conn.send(method, params)
+
+    async def close(self):
+        await self._conn.close()
 
 
 class CDPClient:
+    """会话入口：创建 Driver、管理 Page 池"""
+
     def __init__(self, host: str = '127.0.0.1', port: int = 9222):
         self._host = host
         self._port = port
-        self._driver: Driver = None
-        self._pages = dict()
+        self._driver: Driver | None = None
+        self._pages: dict[str, Page] = {}
 
     def _fetch_browser_ws_url(self) -> str:
-        resp = urllib.request.urlopen(f'http://{self._host}:{self._port}/json/version', timeout=5)
+        resp = urllib.request.urlopen(
+            f'http://{self._host}:{self._port}/json/version', timeout=5)
         return json.loads(resp.read())['webSocketDebuggerUrl']
 
     async def connect(self) -> None:
-        # urllib 是同步阻塞的，扔到线程池避免卡住事件循环。目前没有内置异步 HTTP 库。
         ws_url = await asyncio.to_thread(self._fetch_browser_ws_url)
-        ws = await websockets.connect(ws_url, max_size=2 ** 24)
-        self._driver = Driver(ws)
+        conn = CDPConnection()
+        await conn.connect(ws_url)
+        self._driver = Driver(conn)
 
     async def open_page(self, url: str = '') -> Page:
-        if url != '':
-            _r = parse.urlparse(url)
-            key = f"{_r.scheme}://{_r.netloc}/{_r.path.strip('/')}"
-        else:
-            key = ''
-
-        page = self._pages.get(key)
-        if page is not None:
-            return page
-        print(url)
-        target_id = await self._driver.open_tab(url)
+        target_id = await self._driver.open_tab(url or 'about:blank')
         ws_url = f'ws://{self._host}:{self._port}/devtools/page/{target_id}'
-        ws = await websockets.connect(ws_url, max_size=2 ** 24)
-
-        page = Page(ws, key)
-        self._pages[key] = page
+        conn = CDPConnection()
+        await conn.connect(ws_url)
+        page = Page(conn, target_id)
+        self._pages[target_id] = page
         return page
 
-    async def last_page(self) -> Page:
-        ...
+    async def close_page(self, page: Page) -> None:
+        await page.close()
+        self._pages.pop(page.target_id, None)
+        if self._driver:
+            await self._driver.close_tab(page.target_id)
+
+    async def close(self) -> None:
+        for page in list(self._pages.values()):
+            await page.close()
+        self._pages.clear()
+        if self._driver:
+            await self._driver.close()
+
+    @property
+    def driver(self) -> Driver | None:
+        return self._driver
+
+    @property
+    def pages(self) -> dict[str, Page]:
+        return self._pages
 
 
 if __name__ == '__main__':
     async def main():
-        url = 'https://www.bilibili.com/video/BV1ZkVg6hEeG/?spm_id_from=333.1007.tianma.1-2-2.click&vd_source=544102bc44b42747fd532b892c2f591e'
         client = CDPClient()
         await client.connect()
-        page = await client.open_page(url)
-        print(await page.id)
 
+        page = await client.open_page('about:blank')
+        print('target_id:', page.target_id)
+
+        nav = await page.navigate('https://httpbin.org/get')
+        print('navigate result:', nav)
+
+        title = await page.evaluate('document.title')
+        print('title:', title)
+
+        await client.close()
 
     asyncio.run(main())
