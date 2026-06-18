@@ -20,8 +20,10 @@ class CDPClient:
         if target_id:
             ws_url = f'ws://{self._host}:{self._port}/devtools/page/{target_id}'
         else:
+            # urllib 是同步阻塞的，扔到线程池避免卡住事件循环。目前没有内置异步 HTTP 库。
             ws_url = await asyncio.to_thread(self._fetch_browser_ws_url)
         self._ws = await websockets.connect(ws_url, max_size=2 ** 24)
+        # 启动后台读取协程，不 await —— 让它和 send() 并发运行
         asyncio.create_task(self._read_loop())
 
     def _fetch_browser_ws_url(self) -> str:
