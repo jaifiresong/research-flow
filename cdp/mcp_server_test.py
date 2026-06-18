@@ -172,6 +172,8 @@ def tools_call(*, call_id: str, name: str, **kwargs):
 
 if __name__ == "__main__":
     """
+    测试过程
+    启动：D:\jaifiresong\bili2text\.venv\Scripts\python.exe D:\tmp\research-flow\cdp\mcp_server_test.py
     browser_open url===https://www.zhipin.com/web/geek/jobs?ka=header-jobs
     browser_snapshot
     """
