@@ -14,7 +14,7 @@ from browser import Browser
 
 _tool_logger = logging.getLogger("cdp.tools")
 _tool_logger.setLevel(logging.DEBUG)
-_tool_logger.propagate = False  # 不传递给 root logger，避免输出到控制台
+# _tool_logger.propagate = False  # 不传递给 root logger，避免输出到控制台
 
 _log_path = Path(__file__).parent.parent / "logs/tool_calls.log"
 _handler = logging.FileHandler(str(_log_path), encoding="utf-8")
