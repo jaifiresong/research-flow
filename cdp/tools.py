@@ -25,6 +25,19 @@ _handler.setFormatter(logging.Formatter(
 _tool_logger.addHandler(_handler)
 
 
+def with_timeout(seconds: float = 15.0):
+    """装饰器：给 async 工具函数加上超时限制，超时返回错误字符串而非卡死。"""
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await asyncio.wait_for(func(*args, **kwargs), timeout=seconds)
+            except asyncio.TimeoutError:
+                return f"[错误] {func.__name__} 执行超时 ({seconds}s)，请重试"
+        return wrapper
+    return decorator
+
+
 def log_tool_call(func):
     """装饰器：记录工具调用的参数、返回值、耗时和异常到文件日志。
 
@@ -78,6 +91,7 @@ async def ensure_started() -> None:
 
 
 @tool
+@with_timeout(30.0)  # 页面加载较慢，给 30s
 @log_tool_call
 async def browser_open(url: str, wait: float = 3.0) -> str:
     """导航到指定 URL 并等待页面加载。
@@ -93,6 +107,7 @@ async def browser_open(url: str, wait: float = 3.0) -> str:
 
 
 @tool
+@with_timeout(15.0)
 @log_tool_call
 async def browser_snapshot() -> str:
     """获取当前页面的可访问性快照。
@@ -105,6 +120,7 @@ async def browser_snapshot() -> str:
 
 
 @tool
+@with_timeout(30.0)  # AX 树可能很大
 @log_tool_call
 async def browser_extract(instruction: str) -> str:
     """从当前页面提取结构化数据。
@@ -162,6 +178,7 @@ async def browser_extract(instruction: str) -> str:
 
 
 @tool
+@with_timeout(15.0)
 @log_tool_call
 async def browser_click(ref: str) -> str:
     """点击页面上的可交互元素。
@@ -176,6 +193,7 @@ async def browser_click(ref: str) -> str:
 
 
 @tool
+@with_timeout(15.0)
 @log_tool_call
 async def browser_fill(ref: str, text: str) -> str:
     """向输入框填入文本或在下拉菜单中选择选项。
@@ -191,6 +209,7 @@ async def browser_fill(ref: str, text: str) -> str:
 
 
 @tool
+@with_timeout(15.0)
 @log_tool_call
 async def browser_type(ref: str, text: str) -> str:
     """browser_fill 的别名 —— 向输入框输入文本。
@@ -206,6 +225,7 @@ async def browser_type(ref: str, text: str) -> str:
 
 
 @tool
+@with_timeout(15.0)
 @log_tool_call
 async def browser_evaluate(js: str) -> str:
     """在页面中执行 JavaScript 并返回结果。
@@ -219,6 +239,7 @@ async def browser_evaluate(js: str) -> str:
 
 
 @tool
+@with_timeout(10.0)
 @log_tool_call
 async def browser_title() -> str:
     """获取当前页面的标题。"""
@@ -227,6 +248,7 @@ async def browser_title() -> str:
 
 
 @tool
+@with_timeout(10.0)
 @log_tool_call
 async def browser_current_url() -> str:
     """获取当前页面的 URL。"""
@@ -235,18 +257,21 @@ async def browser_current_url() -> str:
 
 
 @tool
+@with_timeout(30.0)  # 预留足够时间，实际由 seconds 参数控制
 @log_tool_call
 async def browser_wait(seconds: float = 2.0) -> str:
     """等待指定秒数（用于等待页面渲染或动画完成）。
 
     Args:
-        seconds: 等待秒数（默认 2.0）。
+        seconds: 等待秒数（默认 2.0，最大 30.0）。
     """
+    seconds = min(seconds, 30.0)
     await asyncio.sleep(seconds)
     return f"已等待 {seconds}s"
 
 
 @tool
+@with_timeout(10.0)
 @log_tool_call
 async def browser_scroll(direction: str = "down", amount: float = 300, ref: str = "") -> str:
     """按方向滚动页面或指定元素。
@@ -264,6 +289,7 @@ async def browser_scroll(direction: str = "down", amount: float = 300, ref: str 
 
 
 @tool
+@with_timeout(10.0)
 @log_tool_call
 async def browser_scroll_to_bottom() -> str:
     """滚动页面到底部。"""
@@ -273,6 +299,7 @@ async def browser_scroll_to_bottom() -> str:
 
 
 @tool
+@with_timeout(10.0)
 @log_tool_call
 async def browser_scroll_into_view(ref: str) -> str:
     """将指定元素滚动到可视区域中央。
@@ -286,6 +313,7 @@ async def browser_scroll_into_view(ref: str) -> str:
 
 
 @tool
+@with_timeout(10.0)
 @log_tool_call
 async def browser_close() -> str:
     """关闭浏览器并断开 CDP 连接。

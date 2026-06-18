@@ -154,7 +154,7 @@ def t3() -> None:
 
 
 def tools_call(*, call_id: str, call_name: str, **kwargs):
-    print(f"\n调用工具 {name}...")
+    print(f"\n调用工具 {call_name}...")
     send_message(
         proc,
         {
@@ -167,10 +167,10 @@ def tools_call(*, call_id: str, call_name: str, **kwargs):
 
     response = read_message(proc)
     if response is None:
-        print(f"[FAIL] 未收到 {name} 调用响应")
+        print(f"[FAIL] 未收到 {call_name} 调用响应")
         return None
     if response.get("id") != call_id:
-        print(f"[FAIL] {name} 调用响应 ID 不匹配")
+        print(f"[FAIL] {call_name} 调用响应 ID 不匹配")
         return None
     return response
 
@@ -181,6 +181,7 @@ if __name__ == "__main__":
     启动：D:\jaifiresong\bili2text\.venv\Scripts\python.exe D:\tmp\research-flow\cdp\mcp_server_test.py
     browser_open url===https://www.zhipin.com/web/geek/jobs?ka=header-jobs
     browser_snapshot
+    browser_scroll
     """
     try:
         start_mcp_server()
