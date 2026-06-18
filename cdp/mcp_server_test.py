@@ -31,15 +31,20 @@ def send_message(_proc, msg: dict) -> None:
 
 def read_message(_proc, timeout: float = 10.0) -> dict | None:
     """从 MCP 服务读取一条 JSON-RPC 消息。"""
+    line = _proc.stdout.readline()
+    if not line:
+        return None
+    decoded = line.decode("utf-8").strip()
+    # 安全打印：控制台可能是 GBK 编码，JSON 中若含 emoji/私有区字符会打印失败
     try:
-        line = _proc.stdout.readline()
-        if not line:
-            return None
-        decoded = line.decode("utf-8").strip()
         print(f"[S -> C] {decoded}")
+    except UnicodeEncodeError:
+        safe = decoded.encode(sys.stdout.encoding, errors="replace").decode(sys.stdout.encoding)
+        print(f"[S -> C] {safe}")
+    try:
         return json.loads(decoded)
     except Exception as e:
-        print(f"[ERROR] 读取消息失败: {e}")
+        print(f"[ERROR] JSON 解析失败: {e}")
         return None
 
 
@@ -148,7 +153,7 @@ def t3() -> None:
     print(f"[INFO] 发现工具: {tool_names}")
 
 
-def tools_call(*, call_id: str, name: str, **kwargs):
+def tools_call(*, call_id: str, call_name: str, **kwargs):
     print(f"\n调用工具 {name}...")
     send_message(
         proc,
@@ -156,16 +161,16 @@ def tools_call(*, call_id: str, name: str, **kwargs):
             "jsonrpc": "2.0",
             "id": call_id,
             "method": "tools/call",
-            "params": {"name": "browser_open", "arguments": {**kwargs}},
+            "params": {"name": call_name, "arguments": {**kwargs}},
         },
     )
 
     response = read_message(proc)
     if response is None:
-        print("[FAIL] 未收到 get_host_info 调用响应")
+        print(f"[FAIL] 未收到 {name} 调用响应")
         return None
     if response.get("id") != call_id:
-        print("[FAIL] get_host_info 调用响应 ID 不匹配")
+        print(f"[FAIL] {name} 调用响应 ID 不匹配")
         return None
     return response
 
@@ -188,7 +193,7 @@ if __name__ == "__main__":
             data = re.split("\s+", data)
             name = data[0]
             params = {k: v for k, v in [x.split('===') for x in data[1:]]}
-            tools_call(call_id=cnt, name=name, **params)
+            tools_call(call_id=cnt, call_name=name, **params)
             cnt += 1
     finally:
         # 清理子进程
