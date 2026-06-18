@@ -69,7 +69,9 @@ class Driver:
     def __init__(self, conn: CDPConnection):
         self._conn = conn
 
-    async def open_tab(self, url: str = 'about:blank') -> str:
+    async def open_tab(self, url: str) -> str:
+        if not url:
+            url = 'about:blank'
         result = await self._conn.send('Target.createTarget', {'url': url})
         return result['targetId']
 
@@ -131,8 +133,8 @@ class CDPClient:
         await conn.connect(ws_url)
         self._driver = Driver(conn)
 
-    async def open_page(self, url: str = '') -> Page:
-        target_id = await self._driver.open_tab(url or 'about:blank')
+    async def open_page(self, url: str = None) -> Page:
+        target_id = await self._driver.open_tab(url)
         ws_url = f'ws://{self._host}:{self._port}/devtools/page/{target_id}'
         conn = CDPConnection()
         await conn.connect(ws_url)
@@ -153,10 +155,12 @@ if __name__ == '__main__':
         client = CDPClient()
         await client.connect()
 
-        page = await client.open_page('about:blank')
+        page = await client.open_page()
         print('target_id:', page.target_id)
 
-        nav = await page.navigate('https://httpbin.org/get')
+        await asyncio.sleep(3)
+
+        nav = await page.navigate('https://example.com/')
         print('navigate result:', nav)
 
         title = await page.evaluate('document.title')
