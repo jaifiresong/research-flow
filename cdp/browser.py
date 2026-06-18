@@ -149,35 +149,38 @@ class Browser:
 
     # ── scroll ──
 
-    async def scroll(self, direction: str = 'down', amount: float = 300,
+    async def scroll(self, direction: str = 'down', amount: float = 1440,
                      ref: str | None = None):
-        """按方向滚动页面或指定元素。
+        """按方向滚动页面或指定元素，循环直到达到 amount 或到达边界。
 
-        Args:
-            direction: 'up', 'down', 'left', 'right'
-            amount: 滚动像素数
-            ref: 可选，元素引用。传入时滚动该元素，否则滚动整个页面。
+        循环在一次 JS 调用内完成，直接赋值 scrollTop/scrollLeft 同步生效，
+        当场比较判断是否到边界（无进展）或达目标。
         """
-        dx, dy = 0, 0
-        if direction == 'up':
-            dy = -amount
-        elif direction == 'down':
-            dy = amount
-        elif direction == 'left':
-            dx = -amount
-        elif direction == 'right':
-            dx = amount
-        else:
+        signs = {'up': -1, 'down': 1, 'left': -1, 'right': 1}
+        if direction not in signs:
             raise ValueError(f'未知方向: {direction}')
-
+        horiz = direction in ('left', 'right')
+        sign = signs[direction]
+        axis = 'scrollLeft' if horiz else 'scrollTop'
+        step = max(int(amount / 12), 60)
+        target = int(amount)
+        el = 'this' if ref else 'document.scrollingElement'
+        body = (
+            f'const el={el},s=el.{axis};'
+            f'for(let i=0;i<100;i++){{'
+            f'const b=el.{axis};'
+            f'el.{axis}+={sign}*{step};'
+            f'if(el.{axis}===b||Math.abs(el.{axis}-s)>={target})break;'
+            f'}}'
+        )
         if ref:
             obj_id = await self._object_id(ref)
             await self._cdp.send('Runtime.callFunctionOn', {
-                'functionDeclaration': f'function(){{this.scrollBy({dx},{dy})}}',
+                'functionDeclaration': f'function(){{{body}}}',
                 'objectId': obj_id,
             })
         else:
-            await self.evaluate(f'window.scrollBy({dx},{dy})')
+            await self.evaluate(f'(()=>{{{body}}})()')
 
     async def scroll_to_bottom(self):
         """滚动页面到底部。"""

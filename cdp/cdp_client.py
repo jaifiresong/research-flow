@@ -37,6 +37,11 @@ class CDPClient:
                     self._futures.pop(rid).set_result(msg)
         except websockets.ConnectionClosed:
             pass
+        finally:
+            for f in self._futures.values():
+                if not f.done():
+                    f.set_exception(RuntimeError('CDP connection closed'))
+            self._futures.clear()
 
     async def send(self, method: str, params: dict | None = None) -> dict:
         self._id += 1
@@ -45,8 +50,12 @@ class CDPClient:
             msg['params'] = params
         future: asyncio.Future = asyncio.get_event_loop().create_future()
         self._futures[self._id] = future
-        await self._ws.send(json.dumps(msg))
-        resp = await asyncio.wait_for(future, timeout=30)
+        try:
+            await self._ws.send(json.dumps(msg))
+            resp = await asyncio.wait_for(future, timeout=30)
+        finally:
+            await self._futures.pop(self._id, None)
+            future.cancel()  # no-op if already resolved
         err = resp.get('error')
         if err:
             raise RuntimeError(err.get('message', str(err)))

@@ -271,14 +271,14 @@ async def browser_wait(seconds: float = 2.0) -> str:
 
 
 @tool
-@with_timeout(10.0)
+@with_timeout(15.0)
 @log_tool_call
-async def browser_scroll(direction: str = "down", amount: float = 300, ref: str = "") -> str:
+async def browser_scroll(direction: str = "down", amount: float = 1440, ref: str = "") -> str:
     """按方向滚动页面或指定元素。
 
     Args:
         direction: 滚动方向，可选值：'up'（上）、'down'（下，默认）、'left'（左）、'right'（右）。
-        amount: 滚动像素数（默认 300）。想一次滚到底可以传大值如 99999。
+        amount: 滚动像素数（默认 1440）。想一次滚到底可以传大值如 99999。
         ref: 可选，元素引用（如 @e1）。传入时滚动该元素内部，否则滚动整个页面。
     """
     await ensure_started()
