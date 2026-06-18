@@ -15,6 +15,11 @@ class CDPConnection:
         self._event_callbacks: list = []
 
     async def connect(self, ws_url: str) -> None:
+        if self._ws:
+            await self.close()
+            self._ws = None
+            self._id = 0
+            self._futures.clear()
         self._ws = await websockets.connect(ws_url, max_size=2 ** 24)
         asyncio.create_task(self._read_loop())
 
@@ -62,6 +67,12 @@ class CDPConnection:
         if self._ws:
             await self._ws.close()
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+
 
 class Driver:
     """浏览器层连接：管理 targets"""
@@ -69,7 +80,7 @@ class Driver:
     def __init__(self, conn: CDPConnection):
         self._conn = conn
 
-    async def open_tab(self, url: str) -> str:
+    async def open_tab(self, url: str | None = None) -> str:
         if not url:
             url = 'about:blank'
         result = await self._conn.send('Target.createTarget', {'url': url})
@@ -77,6 +88,12 @@ class Driver:
 
     async def close(self):
         await self._conn.close()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
 
 
 class Page:
@@ -112,6 +129,12 @@ class Page:
     async def close(self):
         await self._conn.close()
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+
 
 class CDPClient:
     """会话入口：创建 Driver、管理 Page 池"""
@@ -133,7 +156,7 @@ class CDPClient:
         await conn.connect(ws_url)
         self._driver = Driver(conn)
 
-    async def open_page(self, url: str = None) -> Page:
+    async def open_page(self, url: str | None = None) -> Page:
         target_id = await self._driver.open_tab(url)
         ws_url = f'ws://{self._host}:{self._port}/devtools/page/{target_id}'
         conn = CDPConnection()
@@ -149,24 +172,27 @@ class CDPClient:
         if self._driver:
             await self._driver.close()
 
+    async def __aenter__(self):
+        await self.connect()
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+
 
 if __name__ == '__main__':
     async def main():
-        client = CDPClient()
-        await client.connect()
+        async with CDPClient() as client:
+            page = await client.open_page()
+            print('target_id:', page.target_id)
 
-        page = await client.open_page()
-        print('target_id:', page.target_id)
+            await asyncio.sleep(3)
 
-        await asyncio.sleep(3)
+            nav = await page.navigate('https://example.com/')
+            print('navigate result:', nav)
 
-        nav = await page.navigate('https://example.com/')
-        print('navigate result:', nav)
-
-        title = await page.evaluate('document.title')
-        print('title:', title)
-
-        await client.close()
+            title = await page.evaluate('document.title')
+            print('title:', title)
 
 
     asyncio.run(main())
