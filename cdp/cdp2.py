@@ -4,6 +4,15 @@ import urllib.request
 
 import websockets
 
+"""
+API 反爬安全评估
+- Runtime.evaluate --- API 层面不留痕迹，但要注意注入的 JS 代码本身别太可疑
+
+以后加新功能时有风险的命令
+- Accessibility.enable — 会修改 DOM 结构，JS 可检测（常见反爬检查点）
+- Runtime.enable / Page.enable — 启用 domain 监听后某些行为会变
+- DOM.enable — 开启 DOM 代理追踪
+"""
 
 class CDPConnection:
     """单条 WebSocket 的 CDP 消息协议层：序列化、路由、响应匹配"""
@@ -28,6 +37,8 @@ class CDPConnection:
         self._event_callbacks.append(callback)
 
     async def send(self, method: str, params: dict | None = None) -> dict:
+        if self._ws is None:
+            raise RuntimeError('CDP connection not established')
         self._id += 1
         msg: dict = {'id': self._id, 'method': method}
         if params:
@@ -54,7 +65,12 @@ class CDPConnection:
                     self._futures.pop(rid).set_result(msg)
                 elif msg.get('method') and self._event_callbacks:
                     for cb in self._event_callbacks:
-                        cb(msg['method'], msg.get('params', {}))
+                        try:
+                            result = cb(msg['method'], msg.get('params', {}))
+                            if asyncio.iscoroutine(result):
+                                asyncio.create_task(result)
+                        except Exception:
+                            pass
         except websockets.ConnectionClosed:
             pass
         finally:
@@ -85,6 +101,18 @@ class Driver:
             url = 'about:blank'
         result = await self._conn.send('Target.createTarget', {'url': url})
         return result['targetId']
+
+    async def enable_discovery(self) -> None:
+        await self._conn.send('Target.setDiscoverTargets', {'discover': True})
+
+    def on(self, method: str, callback):
+        """按方法名注册 CDP 事件回调 callback(params: dict)"""
+        def _wrap(event_method: str, params: dict):
+            if event_method == method:
+                return callback(params)
+            return None
+
+        self._conn.on_event(_wrap)
 
     async def close(self):
         await self._conn.close()
@@ -144,6 +172,7 @@ class CDPClient:
         self._port = port
         self._driver: Driver | None = None
         self._pages: dict[str, Page] = {}
+        self._new_page_callback = None
 
     def _fetch_browser_ws_url(self) -> str:
         resp = urllib.request.urlopen(
@@ -151,19 +180,51 @@ class CDPClient:
         return json.loads(resp.read())['webSocketDebuggerUrl']
 
     async def connect(self) -> None:
+        if self._driver is not None:
+            await self.close()
         ws_url = await asyncio.to_thread(self._fetch_browser_ws_url)
         conn = CDPConnection()
         await conn.connect(ws_url)
         self._driver = Driver(conn)
+        await self._driver.enable_discovery()
+        self._driver.on('Target.targetCreated', self._on_target_created)
 
-    async def open_page(self, url: str | None = None) -> Page:
-        target_id = await self._driver.open_tab(url)
+    async def _on_target_created(self, params: dict) -> None:
+        info = params.get('targetInfo', {})
+        if info.get('type') != 'page':
+            return
+        target_id = info['targetId']
+        if target_id in self._pages:
+            return
         ws_url = f'ws://{self._host}:{self._port}/devtools/page/{target_id}'
         conn = CDPConnection()
         await conn.connect(ws_url)
         page = Page(conn, target_id)
         self._pages[target_id] = page
-        return page
+        cb = self._new_page_callback
+        if cb:
+            cb(page)
+
+    def on_new_page(self, callback):
+        """注册回调 callback(page: Page)，每当浏览器自动创建新 tab 时触发"""
+        self._new_page_callback = callback
+
+    async def open_page(self, url: str | None = None) -> Page:
+        target_id = await self._driver.open_tab(url)
+        existing = self._pages.get(target_id)
+        if existing is not None:
+            return existing
+        self._pages[target_id] = None
+        try:
+            ws_url = f'ws://{self._host}:{self._port}/devtools/page/{target_id}'
+            conn = CDPConnection()
+            await conn.connect(ws_url)
+            page = Page(conn, target_id)
+            self._pages[target_id] = page
+            return page
+        except BaseException:
+            self._pages.pop(target_id, None)
+            raise
 
     async def close(self) -> None:
         for page in list(self._pages.values()):
