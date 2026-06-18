@@ -73,9 +73,6 @@ class Driver:
         result = await self._conn.send('Target.createTarget', {'url': url})
         return result['targetId']
 
-    async def close_tab(self, target_id: str) -> None:
-        await self._conn.send('Target.closeTarget', {'targetId': target_id})
-
     async def close(self):
         await self._conn.close()
 
@@ -143,26 +140,12 @@ class CDPClient:
         self._pages[target_id] = page
         return page
 
-    async def close_page(self, page: Page) -> None:
-        await page.close()
-        self._pages.pop(page.target_id, None)
-        if self._driver:
-            await self._driver.close_tab(page.target_id)
-
     async def close(self) -> None:
         for page in list(self._pages.values()):
             await page.close()
         self._pages.clear()
         if self._driver:
             await self._driver.close()
-
-    @property
-    def driver(self) -> Driver | None:
-        return self._driver
-
-    @property
-    def pages(self) -> dict[str, Page]:
-        return self._pages
 
 
 if __name__ == '__main__':
@@ -180,5 +163,6 @@ if __name__ == '__main__':
         print('title:', title)
 
         await client.close()
+
 
     asyncio.run(main())
