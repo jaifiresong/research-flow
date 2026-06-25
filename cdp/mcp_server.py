@@ -1,210 +1,137 @@
 #!/usr/bin/env python3
-"""CDP 浏览器自动化 MCP Server。
+"""MCP 原生底层工作原理示例 (stdio JSON-RPC)"""
 
-通过 Model Context Protocol (stdio JSON-RPC) 暴露 BrowserTools 的所有工具，
-供 Claude Desktop、Codex 等 MCP 客户端调用。
-
-Usage:
-    python mcp_server.py [--host HOST] [--port PORT]
-
-    # 或通过 uv:
-    uv run python mcp_server.py
-
-    在 MCP 客户端配置中:
-    {
-        "mcpServers": {
-            "cdp_driver": {
-                "command": "python",
-                "args": ["/path/to/cdp_driver/mcp_server.py", "--host", "127.0.0.1", "--port", "9222"]
-            }
-        }
-    }
-"""
-
-import argparse
-import asyncio
-import json
-import sys
-import traceback
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent))
-
-from tools import BrowserTools  # noqa: E402
+import asyncio, inspect, json, sys, traceback
 
 VERSION = '1.0.0'
 PROTOCOL_VERSION = '2024-11-05'
 
 
 def log(msg: str) -> None:
-    """输出日志到 stderr（stdout 用于 MCP 协议通信）"""
-    print(f'[cdp_driver:mcp] {msg}', file=sys.stderr, flush=True)
+    print(f'[mcp] {msg}', file=sys.stderr, flush=True)
 
 
 class MCPServer:
-    """MCP JSON-RPC stdio 服务"""
+    """MCP 协议在 stdio 上的完整生命周期演示"""
 
-    def __init__(self, host: str = '127.0.0.1', port: int = 9222):
-        self._host = host
-        self._port = port
-        self._tools = BrowserTools()
-        self._initialized = False
-        self._reader_task: asyncio.Task | None = None
+    def __init__(self):
+        self._tools: list[dict] = []
+        self._handlers: dict[str, callable] = {}
 
-    async def start(self) -> None:
-        """启动服务：连接 Chrome，注册工具，开始读取请求"""
-        log(f'正在连接 Chrome DevTools ({self._host}:{self._port})...')
-        await self._tools.connect(host=self._host, port=self._port)
-        log(f'已连接。注册了 {len(list(self._tools._get_tool_methods()))} 个工具')
+    @staticmethod
+    def _type_to_schema(typ) -> dict:
+        mapping = {str: 'string', int: 'integer', float: 'number', bool: 'boolean', list: 'array', dict: 'object', type(None): 'null'}
+        return {'type': mapping.get(typ, 'string')}
 
-        loop = asyncio.get_running_loop()
-        self._reader_task = asyncio.ensure_future(self._read_loop())
+    def tool(self, name: str | None = None, description: str | None = None, input_schema: dict | None = None):
+        """装饰器：注册工具到 MCP。name/description/input_schema 缺省时从函数自动提取。"""
 
-    async def _read_loop(self) -> None:
-        """从 stdin 逐行读取 JSON-RPC 请求，分发处理"""
-        loop = asyncio.get_running_loop()
-        reader = asyncio.StreamReader()
-        protocol = asyncio.StreamReaderProtocol(reader)
-        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+        def decorator(func):
+            n = name or func.__name__
+            d = description or (func.__doc__ or '').strip() or ''
+            sig = inspect.signature(func)
+            props, required = {}, []
+            for p_name, p in sig.parameters.items():
+                if p_name in ('self', 'cls'):
+                    continue
+                if p.default is inspect.Parameter.empty:
+                    required.append(p_name)
+                type_schema = self._type_to_schema(p.annotation) if p.annotation is not inspect.Parameter.empty else {'type': 'string'}
+                props[p_name] = type_schema
+            schema = input_schema or {'type': 'object', 'properties': props, 'required': required}
 
+            self._tools.append({'name': n, 'description': d, 'inputSchema': schema})
+            self._handlers[n] = func
+            return func
+
+        return decorator
+
+    async def run(self) -> None:
         while True:
-            try:
-                raw = await reader.readline()
-            except Exception:
-                log('stdin 读取异常，退出')
+            raw = await asyncio.to_thread(sys.stdin.buffer.readline)
+            if not raw:
                 break
-
-            if not raw:  # EOF
-                log('stdin 已关闭')
-                break
-
             line = raw.decode('utf-8').strip()
             if not line:
                 continue
-
             try:
-                request = json.loads(line)
+                req = json.loads(line)
             except json.JSONDecodeError:
-                log(f'无效 JSON: {line[:100]}')
                 continue
 
-            response = await self._handle_request(request)
-            if response is not None:
-                self._write(response)
+            resp = await self._dispatch(req)
+            if resp is not None:
+                payload = json.dumps(resp, ensure_ascii=False).encode('utf-8')
+                sys.stdout.buffer.write(payload + b'\n')
+                sys.stdout.buffer.flush()
 
-    def _write(self, msg: dict) -> None:
-        """写 JSON-RPC 响应到 stdout"""
-        stdout = sys.stdout.buffer
-        stdout.write(json.dumps(msg, ensure_ascii=False).encode('utf-8'))
-        stdout.write(b'\n')
-        stdout.flush()
-
-    async def _handle_request(self, request: dict) -> dict | None:
-        """路由 JSON-RPC 请求并返回响应。通知类请求返回 None。"""
-        method = request.get('method', '')
-        req_id = request.get('id')
-        params = request.get('params', {})
+    async def _dispatch(self, req: dict) -> dict | None:
+        method, req_id, params = req.get('method', ''), req.get('id'), req.get('params', {})
+        log(f'-> {method}')
 
         try:
             if method == 'initialize':
-                return self._respond(req_id, {
-                    'protocolVersion': PROTOCOL_VERSION,
-                    'capabilities': {
-                        'tools': {},
+                return {
+                    'jsonrpc': '2.0', 'id': req_id,
+                    'result': {
+                        'protocolVersion': PROTOCOL_VERSION,
+                        'capabilities': {'tools': {}},
+                        'serverInfo': {'name': 'mcp_demo', 'version': VERSION},
                     },
-                    'serverInfo': {
-                        'name': 'cdp_driver',
-                        'version': VERSION,
-                    },
-                })
+                }
 
             if method == 'notifications/initialized':
-                self._initialized = True
                 log('MCP 握手完成')
                 return None
 
             if method == 'ping':
-                return self._respond(req_id, {})
+                return {'jsonrpc': '2.0', 'id': req_id, 'result': {}}
 
             if method == 'tools/list':
-                return self._respond(req_id, {
-                    'tools': self._tools.schemas,
-                })
+                return {'jsonrpc': '2.0', 'id': req_id, 'result': {'tools': self._tools}}
 
             if method == 'tools/call':
                 tool_name = params.get('name', '')
-                arguments = params.get('arguments', {})
-                log(f'调用工具: {tool_name}({arguments})')
+                args = params.get('arguments', {})
+                handler = self._handlers.get(tool_name)
+                if not handler:
+                    return {'jsonrpc': '2.0', 'id': req_id, 'error': {'code': -32601, 'message': f'未知工具: {tool_name}'}}
 
                 try:
-                    result = await self._tools.call(tool_name, **arguments)
+                    result = await handler(**args) if asyncio.iscoroutinefunction(handler) else handler(**args)
                 except Exception as e:
-                    log(f'工具调用失败: {e}')
-                    return self._error(req_id, -32000, str(e))
+                    log(f'工具执行失败: {traceback.format_exc()}')
+                    return {'jsonrpc': '2.0', 'id': req_id, 'error': {'code': -32000, 'message': str(e)}}
 
-                content = self._format_result(tool_name, result)
-                return self._respond(req_id, {'content': content})
+                return {'jsonrpc': '2.0', 'id': req_id, 'result': {'content': [{'type': 'text', 'text': str(result)}]}}
 
-            # 未知方法
-            return self._error(req_id, -32601, f'未知方法: {method}')
+            return {'jsonrpc': '2.0', 'id': req_id, 'error': {'code': -32601, 'message': f'未知方法: {method}'}}
 
         except Exception as e:
-            log(f'处理请求异常: {traceback.format_exc()}')
-            return self._error(req_id, -32603, f'内部错误: {e}')
-
-    def _format_result(self, tool_name: str, result: str) -> list[dict]:
-        """将工具返回值格式化为 MCP content 列表"""
-        if tool_name == 'screenshot':
-            return [
-                {'type': 'image', 'data': result, 'mimeType': 'image/png'},
-                {'type': 'text', 'text': '截图完成'},
-            ]
-        return [{'type': 'text', 'text': result}]
-
-    @staticmethod
-    def _respond(req_id, result: dict) -> dict:
-        return {'jsonrpc': '2.0', 'id': req_id, 'result': result}
-
-    @staticmethod
-    def _error(req_id, code: int, message: str) -> dict:
-        return {'jsonrpc': '2.0', 'id': req_id, 'error': {'code': code, 'message': message}}
-
-    async def shutdown(self) -> None:
-        """关闭服务"""
-        log('正在关闭...')
-        if self._reader_task:
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
-        await self._tools.close()
-
-
-def main():
-    parser = argparse.ArgumentParser(description='CDP 浏览器自动化 MCP Server')
-    parser.add_argument('--host', default='127.0.0.1', help='Chrome DevTools 主机地址')
-    parser.add_argument('--port', type=int, default=9222, help='Chrome DevTools 端口号')
-    args = parser.parse_args()
-
-    server = MCPServer(host=args.host, port=args.port)
-
-    async def run():
-        try:
-            await server.start()
-            await asyncio.Event().wait()  # 永久等待，直到被中断
-        except asyncio.CancelledError:
-            pass
-        except Exception:
             log(traceback.format_exc())
-        finally:
-            await server.shutdown()
+            return {'jsonrpc': '2.0', 'id': req_id, 'error': {'code': -32603, 'message': str(e)}}
+
+
+async def main():
+    server = MCPServer()
+
+    @server.tool()
+    async def greet(name: str = 'World') -> str:
+        """向用户发送问候"""
+        return f'Hello, {name}! from MCP'
+
+    @server.tool()
+    def add(a: float, b: float) -> float:
+        """两数相加"""
+        return a + b
 
     try:
-        asyncio.run(run())
-    except KeyboardInterrupt:
-        log('收到中断信号')
+        await server.run()
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        log(traceback.format_exc())
 
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
