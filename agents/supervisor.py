@@ -1,7 +1,7 @@
 """Pico — 最小化 agent。本课跑通工具调用骨架。"""
 import asyncio
-from typing import Annotated, TypedDict
 import operator
+from typing import Annotated, TypedDict
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
 from langchain_deepseek import ChatDeepSeek
 from langgraph.graph import StateGraph, END
@@ -9,9 +9,10 @@ from langgraph.types import Overwrite
 
 from tools.base import read_file, write_file, edit_file, run_bash, workplace_dir
 from tools.cdp_driver.tools import BrowserTools
-
 from trimmer import Trimmer
 
+_LOOP = asyncio.new_event_loop()
+asyncio.set_event_loop(_LOOP)
 bt = BrowserTools()
 TOOLS = [read_file, write_file, edit_file, run_bash] + bt.as_langchain_tools()
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
@@ -52,7 +53,11 @@ def tools_node(state: AgentState) -> dict:
         for tc in last_msg.tool_calls:
             tool = TOOLS_BY_NAME.get(tc["name"])
             if tool:
-                output = await tool.ainvoke(tc["args"])
+                try:
+                    output = await tool.ainvoke(tc["args"])
+                except Exception as e:
+                    output = f"工具调用失败：{e}"
+                    print(output)
             else:
                 output = f"未知工具：{tc['name']}"
             outputs.append((tc["id"], output))
@@ -68,7 +73,7 @@ def tools_node(state: AgentState) -> dict:
     #     results.append(ToolMessage(
     #         content=output, tool_call_id=tc["id"]
     #     ))
-    results = asyncio.run(_invoke_all())
+    results = _LOOP.run_until_complete(_invoke_all())
 
     return {"messages": [ToolMessage(content=content, tool_call_id=tid) for tid, content in results]}
 
