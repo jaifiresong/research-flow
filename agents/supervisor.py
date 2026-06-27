@@ -1,4 +1,5 @@
 """Pico — 最小化 agent。本课跑通工具调用骨架。"""
+import asyncio
 from typing import Annotated, TypedDict
 import operator
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
@@ -7,9 +8,12 @@ from langgraph.graph import StateGraph, END
 from langgraph.types import Overwrite
 
 from tools.base import read_file, write_file, edit_file, run_bash, workplace_dir
+from tools.cdp_driver.tools import BrowserTools
+
 from trimmer import Trimmer
 
-TOOLS = [read_file, write_file, edit_file, run_bash]
+bt = BrowserTools()
+TOOLS = [read_file, write_file, edit_file, run_bash] + bt.as_langchain_tools()
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 
 
@@ -42,17 +46,31 @@ def tools_node(state: AgentState) -> dict:
     """执行 LLM 请求的工具调用。"""
     last_msg = state["messages"][-1]
     print("LLM 工具调用：", last_msg.model_dump_json())
-    results = []
-    for tc in last_msg.tool_calls:
-        tool = TOOLS_BY_NAME.get(tc["name"])
-        if tool:
-            output = tool.invoke(tc["args"])
-        else:
-            output = f"未知工具：{tc['name']}"
-        results.append(ToolMessage(
-            content=output, tool_call_id=tc["id"]
-        ))
-    return {"messages": results}
+
+    async def _invoke_all():
+        outputs = []
+        for tc in last_msg.tool_calls:
+            tool = TOOLS_BY_NAME.get(tc["name"])
+            if tool:
+                output = await tool.ainvoke(tc["args"])
+            else:
+                output = f"未知工具：{tc['name']}"
+            outputs.append((tc["id"], output))
+        return outputs
+
+    # results = []
+    # for tc in last_msg.tool_calls:
+    #     tool = TOOLS_BY_NAME.get(tc["name"])
+    #     if tool:
+    #         output = tool.invoke(tc["args"])
+    #     else:
+    #         output = f"未知工具：{tc['name']}"
+    #     results.append(ToolMessage(
+    #         content=output, tool_call_id=tc["id"]
+    #     ))
+    results = asyncio.run(_invoke_all())
+
+    return {"messages": [ToolMessage(content=content, tool_call_id=tid) for tid, content in results]}
 
 
 # ── 路由：没有 tool_calls → end ────────────
