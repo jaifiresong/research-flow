@@ -1,5 +1,6 @@
 """Pico — 最小化 agent。本课跑通工具调用骨架。"""
 import asyncio
+import json
 import operator
 from typing import Annotated, TypedDict
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
@@ -46,7 +47,8 @@ def agent_node(state: AgentState) -> dict:
 def tools_node(state: AgentState) -> dict:
     """执行 LLM 请求的工具调用。"""
     last_msg = state["messages"][-1]
-    print("LLM 工具调用：", last_msg.model_dump_json())
+    # print("LLM 工具调用：", last_msg.model_dump_json())
+    print("LLM 工具调用：", json.dumps(dict(tool_calls=last_msg.tool_calls, content=last_msg.content, additional_kwargs=last_msg.additional_kwargs)))
 
     async def _invoke_all():
         outputs = []
