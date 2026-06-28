@@ -45,6 +45,10 @@ def main():
     messages = []
     while True:
         user_input = input("你: ").strip()
+        # 触发粘贴命令
+        if user_input == "$$$":
+            user_input = pyperclip.paste()
+
         if user_input.lower() == "/exit":
             break
         if not user_input:
@@ -62,4 +66,5 @@ def main():
 
 
 if __name__ == "__main__":
+    import pyperclip
     main()
