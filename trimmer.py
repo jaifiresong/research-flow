@@ -9,9 +9,9 @@ from pydantic import BaseModel
 from tools.base import workplace_dir
 
 # 超过此数量时触发裁剪
-MAX_MESSAGES = 20
+MAX_MESSAGES = 50
 # 保留最近多少条不动（≥ 一次工具调用往返，给安全切点留容错空间）
-KEEP_RECENT = 12
+KEEP_RECENT = 30
 
 SYSTEM_PROMPT = f"""\
 你是 Pico，一个文件操作助手。你拥有读写文件、编辑文件和执行 bash 的能力。
@@ -69,9 +69,9 @@ class Trimmer:
         self.summary = summary
         self.llm = llm
 
-        print("-" * 50, "消息裁剪器：原始消息", "-" * 50)
-        for msg in self.messages:
-            print(msg.type, msg.model_dump_json())
+        with open("tmp/messages.jsonl", "w", encoding="utf-8") as fp:
+            fp.writelines(f"{msg.type} " + json.dumps(msg.model_dump(), ensure_ascii=False) + "\n" for msg in self.messages)
+
         print("-" * 50, f"消息裁剪器：当前 {len(self.messages)} 条", "-" * 50)
 
     def _should_trim(self) -> bool:

@@ -1,12 +1,10 @@
 """Pico 交互入口。"""
+import config
 from agents.supervisor import build_graph
-from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 import sqlite3
-
-load_dotenv()
 
 conn = sqlite3.connect("tmp/pico_checkpoints.db", check_same_thread=False)
 checkpointer = SqliteSaver(conn)

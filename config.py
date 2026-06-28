@@ -1,3 +1,4 @@
+import logging
 import os
 from dotenv import load_dotenv
 from logging.config import dictConfig
@@ -5,10 +6,9 @@ from pathlib import Path
 
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "deepseek-chat")
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY environment variable is required, set it in .env file")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+if not DEEPSEEK_API_KEY:
+    raise ValueError("DEEPSEEK_API_KEY environment variable is required, set it in .env file")
 
 # 确保日志目录存在
 Path("logs").mkdir(parents=True, exist_ok=True)
@@ -30,11 +30,11 @@ dictConfig(
                 "stream": "ext://sys.stderr",
             },
             # ── 按业务域分文件 ──
-            "file_app": {
+            "tool_call": {
                 "class": "logging.handlers.RotatingFileHandler",
-                "level": "INFO",
+                "level": logging.DEBUG,
                 "formatter": "default",
-                "filename": "logs/app.log",
+                "filename": "logs/tools_call.log",
                 "maxBytes": 10 * 1024 * 1024,  # 10MB
                 "backupCount": 5,
                 "encoding": "utf-8",
@@ -66,9 +66,9 @@ dictConfig(
             "aiosqlite.context": {"level": "WARNING", "handlers": []},
             "langchain_core": {"level": "WARNING", "handlers": []},
             # ── 业务日志（子 logger 通过 propagate=True 继承 pi_server 的 console+app）──
-            "pi_server": {
+            "tool_call": {
                 "level": "INFO",
-                "handlers": ["console", "file_app"],
+                "handlers": ["console", "tool_call"],
                 "propagate": False,
             },
             "pi_server.agent": {
@@ -88,3 +88,7 @@ dictConfig(
         },
     }
 )
+
+if __name__ == "__main__":
+    r = Path("tmp")
+    print(r)
